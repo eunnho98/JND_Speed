@@ -1,0 +1,9 @@
+opencv-python==4.11.0.86
+yt-dlp==2025.6.9
+librosa==0.11.0
+panns-inference==0.1.0
+numpy==2.2.6
+soundfile==0.13.1
+tqdm==4.67.1
+matplotlib==3.10.3
+seaborn==0.13.2
