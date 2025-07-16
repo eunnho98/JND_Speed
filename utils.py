@@ -139,77 +139,73 @@ def openVideoStream(youtube_url: str) -> cv2.VideoCapture:
         return cap
 
 
-"""
-def extractFrames(
-    cap: cv2.VideoCapture,
-    start_time_sec: int,
-    duration_sec: int,
-    fps: int,
-    output_folder_path: str,
-):
-    
-    열려 있는 VideoCapture 스트림에서 특정 구간의 프레임을 추출하고 저장
+def extractFrames(cap, start_time_sec, duration_sec, fps, output_folder_path):
+    """
+    연속적으로 프레임을 읽으며 일정 간격마다 저장
+    duration_sec이 None이면 start_time_sec부터 영상 끝까지 추출
 
     @param cap: cv2.VideoCapture 객체
     @param start_time_sec: 추출을 시작할 영상 지점(초)
     @param duration_sec: 추출할 길이(초)
     @param fps: 초당 추출할 프레임 수
     @param output_folder_path: 이미지 저장 폴더
-    
+    """
+
     if not cap.isOpened():
-        print("오류: 유효하지 않은 VideoCapture 객체")
+        print("❌ VideoCapture 열기 실패")
         return False
 
     os.makedirs(output_folder_path, exist_ok=True)
-    print(
-        f"\n{start_time_sec}초부터 {duration_sec}초 동안 초당 {fps} 프레임 추출 시작..."
-    )
 
-    frame_count = 0
-    last_saved_msec = start_time_sec * 1000
-    target_frame_interval_msec = 1000 / fps
+    # 영상 기본 정보
+    video_fps = cap.get(cv2.CAP_PROP_FPS)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    total_duration_sec = total_frames / video_fps
 
-    cap.set(cv2.CAP_PROP_POS_MSEC, start_time_sec * 1000)
-    actual_start_msec = cap.get(cv2.CAP_PROP_POS_MSEC)
-    if abs(actual_start_msec - (start_time_sec * 1000)) > 1000:
-        print(
-            f"경고: 스트림 탐색({start_time_sec}s)이 정확하지 않을 수 있음. (실제 시작: {actual_start_msec/1000.0:.2f}s)"
-        )
+    # 시작/종료 프레임 계산
+    start_frame = int(start_time_sec * video_fps)
+    if duration_sec is None:
+        end_frame = total_frames
+        print(f"📌 duration_sec=None → 끝까지 추출 (총 {total_duration_sec:.2f}s)")
+    else:
+        end_frame = int((start_time_sec + duration_sec) * video_fps)
+
+    frame_interval = max(1, int(round(video_fps / fps)))
+
+    print(f"\n🎬 시작 프레임: {start_frame}, 종료 프레임: {end_frame}")
+    print(f"🎯 프레임 간격: {frame_interval} (video fps: {video_fps:.2f})")
+
+    cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
     extraction_start_time = time.time()
+    current_frame = start_frame
+    saved_count = 0
 
-    while True:
-        current_msec = cap.get(cv2.CAP_PROP_POS_MSEC)
-
-        if current_msec / 1000.0 >= (start_time_sec + duration_sec):
-            print(
-                f"지정된 구간 ({start_time_sec}-{start_time_sec + duration_sec}초) 추출 완료."
-            )
-            break
-
+    while current_frame < end_frame:
         ret, frame = cap.read()
         if not ret:
-            print("스트림 끝에 도달했거나 더 이상 프레임을 읽을 수 없음, 추출 종료.")
+            print("❌ 프레임 읽기 실패 또는 영상 끝 도달")
             break
 
-        if (
-            frame_count == 0
-            or (current_msec - last_saved_msec) >= target_frame_interval_msec
-        ):
+        if (current_frame - start_frame) % frame_interval == 0:
             filename = os.path.join(
                 output_folder_path,
-                f"{start_time_sec}s_{duration_sec}s_{fps}fps_{frame_count:03d}.jpg",
+                (
+                    f"{start_time_sec}s_{fps}fps_{saved_count:03d}.jpg"
+                    if duration_sec is None
+                    else f"{start_time_sec}s_{duration_sec}s_{fps}fps_{saved_count:03d}.jpg"
+                ),
             )
-            cv2.imwrite(filename, frame)
-            frame_count += 1
-            last_saved_msec = current_msec
+            cv2.imwrite(filename, frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            saved_count += 1
+
+        current_frame += 1
 
     extraction_end_time = time.time()
     print(
-        f"총 {frame_count}개 프레임 추출 완료. 소요 시간: {extraction_end_time - extraction_start_time:.2f}초"
+        f"✅ 총 {saved_count}개 프레임 저장 완료. 소요 시간: {extraction_end_time - extraction_start_time:.2f}초"
     )
-    return frame_count
-"""
+    return saved_count
 
 
 def extractFrames720p(
@@ -272,7 +268,7 @@ def extractFrames720p(
                 output_folder_path,
                 f"{start_time_sec}s_{duration_sec}s_{fps}fps_{frame_count:03d}.jpg",
             )
-            cv2.imwrite(filename, resized_frame)
+            cv2.imwrite(filename, resized_frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
             frame_count += 1
             last_saved_msec = current_msec
 
