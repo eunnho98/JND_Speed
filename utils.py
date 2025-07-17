@@ -1,4 +1,4 @@
-import cv2, yt_dlp, os, time, librosa, tempfile, uuid, glob, time, torch
+import cv2, yt_dlp, os, time, librosa, tempfile, uuid, glob, time, torch, re
 from panns_inference import AudioTagging, SoundEventDetection, labels
 import numpy as np
 import matplotlib.pyplot as plt
@@ -781,6 +781,13 @@ def create_segmented_video(input_video_path, shot_boundaries, output_filename):
 
 
 # * ------------------- SI, TI, Optical Flow -------------------
+def extract_frame_number(path):
+    """
+    파일 이름에서 정수형 프레임 번호 추출 (예: '0s_30.0fps_896.jpg' → 896)
+    """
+    match = re.search(r"(\d+)\.jpg", path)
+    return int(match.group(1)) if match else -1
+
 def calculateSI(path):
     """
     Spatial Information (SI) 계산\n
@@ -790,8 +797,8 @@ def calculateSI(path):
     @param path: 이미지가 저장된 폴더 경로
     """
     si_values = []
-    frames = sorted(glob.glob(os.path.join(path, "*.jpg")))
-    for img_path in frames:
+    frames = sorted(glob.glob(os.path.join(path, "*.jpg")), key=extract_frame_number)
+    for img_path in tqdm(frames, desc="Calculating SI"):
         img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
         if img is None:
             continue
@@ -815,9 +822,9 @@ def calculateTI(path):
     """
     ti_values = []
     prev_img = None
-    frames = sorted(glob.glob(os.path.join(path, "*.jpg")))
+    frames = sorted(glob.glob(os.path.join(path, "*.jpg")), key=extract_frame_number)
 
-    for img_path in frames:
+    for img_path in tqdm(frames, desc="Calculating TI"):
         img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
         if img is None:
             continue
@@ -840,13 +847,14 @@ def calculateOpticalFlow(path):
 
     @param path: 이미지가 저장된 폴더 경로
     """
-    frames = sorted(glob.glob(os.path.join(path, "*.jpg")))
+    frames = sorted(glob.glob(os.path.join(path, "*.jpg")), key=extract_frame_number)
     flow_magnitudes = []
 
     prev = None
     prev_pts = None
+    imputed_indices = []  # 보간된 프레임 인덱스 기록
 
-    for img_path in frames:
+    for i, img_path in enumerate(tqdm(frames, desc="Calculating Optical Flow")):
         frame = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
         if frame is None:
             continue
@@ -854,20 +862,36 @@ def calculateOpticalFlow(path):
         if prev is not None and prev_pts is not None:
             next_pts, status, _ = cv2.calcOpticalFlowPyrLK(prev, frame, prev_pts, None)
 
-            # 유효하게 추적된 점만 선택
-            good_prev = prev_pts[status.flatten() == 1]
-            good_next = next_pts[status.flatten() == 1]
+            if next_pts is not None and status is not None:
+                good_prev = prev_pts[status.flatten() == 1]
+                good_next = next_pts[status.flatten() == 1]
 
-            # 각 점의 이동 거리 계산
-            displacements = np.linalg.norm(good_next - good_prev, axis=1)
-            mean_disp = np.mean(displacements)
-            flow_magnitudes.append(mean_disp)
+                if len(good_prev) > 0:
+                    displacements = np.linalg.norm(good_next - good_prev, axis=1)
+                    mean_disp = np.mean(displacements)
+                    flow_magnitudes.append(mean_disp)
+                else:
+                    # 추적 실패 → 이전 값 보간
+                    imputed_indices.append(i)
+                    flow_magnitudes.append(flow_magnitudes[-1] if flow_magnitudes else 0)
+            else:
+                # Optical flow 계산 실패 → 보간
+                imputed_indices.append(i)
+                flow_magnitudes.append(flow_magnitudes[-1] if flow_magnitudes else 0)
+        elif prev is not None:
+            # feature 추출 실패 → 보간
+            imputed_indices.append(i)
+            flow_magnitudes.append(flow_magnitudes[-1] if flow_magnitudes else 0)
 
-        # 다음 루프를 위한 준비
         prev = frame
-        prev_pts = cv2.goodFeaturesToTrack(
-            frame, maxCorners=100, qualityLevel=0.3, minDistance=7
-        )
+        prev_pts = cv2.goodFeaturesToTrack(frame, maxCorners=100, qualityLevel=0.3, minDistance=7)
+
+    # 결과 요약 출력
+    if imputed_indices:
+        print(f"[Optical Flow] 보간된 프레임 수: {len(imputed_indices)}개")
+        print(f"[Optical Flow] 보간된 프레임 인덱스: {imputed_indices}")
+    else:
+        print("[Optical Flow] 모든 프레임에서 정상적으로 Optical Flow 계산 완료.")
 
     return flow_magnitudes
 
