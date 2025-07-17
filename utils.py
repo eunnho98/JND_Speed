@@ -196,7 +196,7 @@ def extractFrames(cap, start_time_sec, duration_sec, fps, output_folder_path):
                     else f"{start_time_sec}s_{duration_sec}s_{fps}fps_{saved_count:03d}.jpg"
                 ),
             )
-            cv2.imwrite(filename, frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            cv2.imwrite(filename, frame, [cv2.IMWRITE_JPEG_QUALITY, 30])
             saved_count += 1
 
         current_frame += 1
@@ -788,6 +788,7 @@ def extract_frame_number(path):
     match = re.search(r"(\d+)\.jpg", path)
     return int(match.group(1)) if match else -1
 
+
 def calculateSI(path):
     """
     Spatial Information (SI) 계산\n
@@ -873,7 +874,9 @@ def calculateOpticalFlow(path):
                 else:
                     # 추적 실패 → 이전 값 보간
                     imputed_indices.append(i)
-                    flow_magnitudes.append(flow_magnitudes[-1] if flow_magnitudes else 0)
+                    flow_magnitudes.append(
+                        flow_magnitudes[-1] if flow_magnitudes else 0
+                    )
             else:
                 # Optical flow 계산 실패 → 보간
                 imputed_indices.append(i)
@@ -884,7 +887,9 @@ def calculateOpticalFlow(path):
             flow_magnitudes.append(flow_magnitudes[-1] if flow_magnitudes else 0)
 
         prev = frame
-        prev_pts = cv2.goodFeaturesToTrack(frame, maxCorners=100, qualityLevel=0.3, minDistance=7)
+        prev_pts = cv2.goodFeaturesToTrack(
+            frame, maxCorners=100, qualityLevel=0.3, minDistance=7
+        )
 
     # 결과 요약 출력
     if imputed_indices:
