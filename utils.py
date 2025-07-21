@@ -68,18 +68,19 @@ def openVideoStream(youtube_url: str) -> cv2.VideoCapture:
 """
 
 
+"""
 def openVideoStream(youtube_url: str) -> cv2.VideoCapture:
-    """
-    OpenCV를 사용하여 YouTube 비디오의 스트림(30fps)을 여는 함수, 30fps 실패 시 최대 fps로\n
-    가져올 수 있는 최고 화질을 가져옴\n
-    간혹 쿠키 문제가 발생할 수 있음\n
-    getcookies.txt 구글 플러그인 설치 후, 유튜브로 들어가 쿠키 파일 export 후 cookiefile 경로에 저장하면 해결 가능\n
-    구글 계정이 여러가지 로그인이 되어있다면 바꿔가면서 다 넣어보기\n
-    보안상 쿠키 파일은 push하지 않았음
+    
+    # OpenCV를 사용하여 YouTube 비디오의 스트림(30fps)을 여는 함수, 30fps 실패 시 최대 fps로\n
+    # 가져올 수 있는 최고 화질을 가져옴\n
+    # 간혹 쿠키 문제가 발생할 수 있음\n
+    # getcookies.txt 구글 플러그인 설치 후, 유튜브로 들어가 쿠키 파일 export 후 cookiefile 경로에 저장하면 해결 가능\n
+    # 구글 계정이 여러가지 로그인이 되어있다면 바꿔가면서 다 넣어보기\n
+    # 보안상 쿠키 파일은 push하지 않았음
 
-    @param youtube_url: YouTube 비디오의 URL
-    @return: 열기 실패 시 False, 성공시 cv2.VideoCapture 객체
-    """
+    # @param youtube_url: YouTube 비디오의 URL
+    # @return: 열기 실패 시 False, 성공시 cv2.VideoCapture 객체
+    
     print(f"'{youtube_url}'에서 30fps 비디오 스트림 URL을 가져오는 중...")
 
     ydl_options = {
@@ -137,19 +138,87 @@ def openVideoStream(youtube_url: str) -> cv2.VideoCapture:
             return False
 
         return cap
+"""
 
 
+def openVideoStream(youtube_url: str) -> cv2.VideoCapture:
+    """
+    OpenCV를 사용하여 YouTube progressive 스트림 중 720p + 30fps를 우선 선택하고,
+    720p가 없을 경우 progressive 중 최대 해상도 스트림을 fallback으로 선택합니다.
+    """
+    print(f"'{youtube_url}'에서 progressive 720p 스트림 URL을 가져오는 중...")
+
+    ydl_options = {
+        "format": "bestvideo+bestaudio/best",
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+        "cookiefile": "./cooks.txt",  # 필요 없다면 생략 가능
+    }
+
+    with yt_dlp.YoutubeDL(ydl_options) as ydl:
+        info_dict = ydl.extract_info(youtube_url, download=False)
+        formats = info_dict.get("formats", [])
+
+        # ✅ 1차 시도: progressive + 30fps + height == 720
+        selected_format = None
+        for f in formats:
+            if (
+                f.get("vcodec") != "none"
+                and f.get("acodec") != "none"
+                and f.get("url")
+                and f.get("height") == 720
+                and f.get("fps") == 30
+            ):
+                selected_format = f
+                break
+
+        # 🔁 2차 시도: progressive 중 최대 해상도
+        if not selected_format:
+            print(
+                "⚠️ 720p @30fps progressive 스트림 없음 → fallback으로 최대 해상도 progressive 선택"
+            )
+            max_height = -1
+            for f in formats:
+                if (
+                    f.get("vcodec") != "none"
+                    and f.get("acodec") != "none"
+                    and f.get("url")
+                    and f.get("height", 0) > max_height
+                ):
+                    selected_format = f
+                    max_height = f["height"]
+
+        if not selected_format:
+            print("❌ progressive 스트림을 찾을 수 없습니다.")
+            return False
+
+        video_stream_url = selected_format["url"]
+        print(
+            f"🎬 선택된 스트림: {selected_format['ext']} | "
+            f"{selected_format['height']}p @ {selected_format.get('fps', 'N/A')}fps"
+        )
+        print(f"URL: {video_stream_url}")
+        cap = cv2.VideoCapture(video_stream_url)
+        if not cap.isOpened():
+            print("❌ OpenCV로 스트림을 열 수 없습니다.")
+            return False
+
+        return cap
+
+
+"""
 def extractFrames(cap, start_time_sec, duration_sec, fps, output_folder_path):
-    """
-    연속적으로 프레임을 읽으며 일정 간격마다 저장
-    duration_sec이 None이면 start_time_sec부터 영상 끝까지 추출
+    
+    # 연속적으로 프레임을 읽으며 일정 간격마다 저장
+    # duration_sec이 None이면 start_time_sec부터 영상 끝까지 추출
 
-    @param cap: cv2.VideoCapture 객체
-    @param start_time_sec: 추출을 시작할 영상 지점(초)
-    @param duration_sec: 추출할 길이(초)
-    @param fps: 초당 추출할 프레임 수
-    @param output_folder_path: 이미지 저장 폴더
-    """
+    # @param cap: cv2.VideoCapture 객체
+    # @param start_time_sec: 추출을 시작할 영상 지점(초)
+    # @param duration_sec: 추출할 길이(초)
+    # @param fps: 초당 추출할 프레임 수
+    # @param output_folder_path: 이미지 저장 폴더
+    
 
     if not cap.isOpened():
         print("❌ VideoCapture 열기 실패")
@@ -197,6 +266,87 @@ def extractFrames(cap, start_time_sec, duration_sec, fps, output_folder_path):
                 ),
             )
             cv2.imwrite(filename, frame, [cv2.IMWRITE_JPEG_QUALITY, 30])
+            saved_count += 1
+
+        current_frame += 1
+
+    extraction_end_time = time.time()
+    print(
+        f"✅ 총 {saved_count}개 프레임 저장 완료. 소요 시간: {extraction_end_time - extraction_start_time:.2f}초"
+    )
+    return saved_count
+"""
+
+
+def extractFrames(
+    cap,
+    start_time_sec,
+    duration_sec,
+    fps,
+    output_folder_path,
+    resize_to=(320, 180),  # 원하는 해상도 (width, height)
+):
+    """
+    duration_sec이 None이면 start_time_sec부터 끝까지 추출\n
+    fps는 cap.get(cv2.CAP_PROP_FPS) 권장 (원본 영상의 fps)\n
+    grab + retrieve + resize 최적화된 프레임 추출
+    """
+
+    if not cap.isOpened():
+        print("❌ VideoCapture 열기 실패")
+        return False
+
+    os.makedirs(output_folder_path, exist_ok=True)
+
+    # 영상 정보
+    video_fps = cap.get(cv2.CAP_PROP_FPS)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    total_duration_sec = total_frames / video_fps
+
+    # 시작/종료 프레임 계산
+    start_frame = int(start_time_sec * video_fps)
+    if duration_sec is None:
+        end_frame = total_frames
+        print(f"📌 duration_sec=None → 끝까지 추출 (총 {total_duration_sec:.2f}s)")
+    else:
+        end_frame = int((start_time_sec + duration_sec) * video_fps)
+
+    frame_interval = max(1, int(round(video_fps / fps)))
+
+    print(f"\n🎬 시작 프레임: {start_frame}, 종료 프레임: {end_frame}")
+    print(f"🎯 프레임 간격: {frame_interval} (video fps: {video_fps:.2f})")
+    print(f"🖼️ 해상도 축소: {resize_to[0]}x{resize_to[1]}")
+
+    cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+
+    extraction_start_time = time.time()
+    current_frame = start_frame
+    saved_count = 0
+
+    while current_frame < end_frame:
+        grabbed = cap.grab()
+        if not grabbed:
+            print("❌ grab 실패 또는 영상 끝 도달")
+            break
+
+        if (current_frame - start_frame) % frame_interval == 0:
+            ret, frame = cap.retrieve()
+            if not ret or frame is None:
+                print("❌ retrieve 실패")
+                break
+
+            # 해상도 줄이기
+            frame = cv2.resize(frame, resize_to, interpolation=cv2.INTER_AREA)
+
+            filename = os.path.join(
+                output_folder_path,
+                (
+                    f"{start_time_sec}s_{fps}fps_{saved_count:03d}.jpg"
+                    if duration_sec is None
+                    else f"{start_time_sec}s_{duration_sec}s_{fps}fps_{saved_count:03d}.jpg"
+                ),
+            )
+            cv2.imwrite(filename, frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
             saved_count += 1
 
         current_frame += 1
@@ -301,7 +451,7 @@ def getAudioCropped(autio_path, start_sec=None, end_sec=None):
     return cropped[None, :], sr
 
 
-def getAudioCroppedFromURL(youtube_url, start_sec=None, end_sec=None):
+def getAudioCroppedFromURL(youtube_url, start_sec=None, end_sec=None, isMono=True):
     """
     YouTube URL에서 오디오를 불러와 (1, size)로 반환
     tmp 디렉토리에 파일이 저장되어 함수 실행 후 자동으로 오디오 파일은 삭제됨
@@ -337,7 +487,7 @@ def getAudioCroppedFromURL(youtube_url, start_sec=None, end_sec=None):
             wav_path = f"{tmp_basename}.wav"
 
         # librosa 로드, PANNs 모델은 32kHz 기준
-        audio, sr = librosa.load(wav_path, sr=32000, mono=True)
+        audio, sr = librosa.load(wav_path, sr=32000, mono=isMono)
 
         if start_sec is None and end_sec is None:
             return audio[None, :], sr
@@ -374,7 +524,7 @@ def audioTagging(device: str, audio, n=10):
     return clipwise_output
 
 
-def eventDetection(device: str, audio, clipwise_output, n=5):
+def eventDetectionWithOverallTopk(device: str, audio, clipwise_output, n=5):
     """
     전체 영상에서 등장하는 오디오 상위 n개 클래스의 프레임별 확률 시각화
 
@@ -396,6 +546,51 @@ def eventDetection(device: str, audio, clipwise_output, n=5):
 
     plt.title(f"Top-{n} predicted sound classes over frames")
     plt.xlabel("Frame Index")
+    plt.ylabel("Probability")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+
+def eventDetectionWithPerTopk(device: str, audio, min_score=0.2):
+    """
+    각 프레임에 대해, min_score 이상 오디오 클래스 시각화
+
+    @param device: 'cpu' or 'cuda'
+    @param audio: (1, N) shaped numpy audio
+    @param min_score: 시각화 대상 클래스의 최소 최대 확률 기준
+    """
+    sr = 32000
+    sed = SoundEventDetection(checkpoint_path=None, device=device)
+    framewise_output = sed.inference(audio)[0]  # shape: (T, 527)
+
+    # ⏱️ 시간축 (초 단위)
+    num_frames = framewise_output.shape[0]
+    duration_sec = audio.shape[1] / sr
+    x = np.linspace(0, duration_sec, num_frames)
+
+    # 🎯 클래스별 최대 확률 계산
+    max_scores = np.max(framewise_output, axis=0)
+    filtered_indices = np.where(max_scores >= min_score)[0]
+
+    # 📋 출력 + 시각화
+    if len(filtered_indices) == 0:
+        print(f"\n❗ 최대 확률이 {min_score} 이상인 클래스가 없습니다.")
+        return
+
+    print(f"\n최대 확률이 {min_score} 이상인 클래스 수: {len(filtered_indices)}개")
+    for idx in filtered_indices[np.argsort(max_scores[filtered_indices])[::-1]]:
+        label = labels[idx]
+        max_val = max_scores[idx]
+        print(f"- {label}: 최대 {max_val:.3f}")
+
+    # 📈 시각화
+    plt.figure(figsize=(15, 6))
+    for idx in filtered_indices:
+        plt.plot(x, framewise_output[:, idx], label=labels[idx])
+    plt.title(f"Classes with max score ≥ {min_score}")
+    plt.xlabel("Time (seconds)")
     plt.ylabel("Probability")
     plt.legend()
     plt.grid(True)
