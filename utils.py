@@ -6,6 +6,7 @@ import seaborn as sns
 import soundfile as sf
 from tqdm import tqdm
 import torch.nn.functional as F
+import re
 
 # * ------------------ 비디오 프레임 추출 ------------------
 
@@ -451,7 +452,9 @@ def getAudioCropped(autio_path, start_sec=None, end_sec=None):
     return cropped[None, :], sr
 
 
-def getAudioCroppedFromURL(youtube_url, start_sec=None, end_sec=None, isMono=True):
+def getAudioCroppedFromURL(
+    youtube_url, start_sec=None, end_sec=None, isMono=True, sr=32000
+):
     """
     YouTube URL에서 오디오를 불러와 (1, size)로 반환
     tmp 디렉토리에 파일이 저장되어 함수 실행 후 자동으로 오디오 파일은 삭제됨
@@ -460,6 +463,8 @@ def getAudioCroppedFromURL(youtube_url, start_sec=None, end_sec=None, isMono=Tru
     @param youtube_url: youtube URL
     @param start_sec: crop할 시작점, None이면 전체
     @param end_sec: crop할 끝점, None이면 전체
+    @param isMono: mono로 가져올지, stero로 가져올지, default=True
+    @param sr: default=32,000 (PANNs 입력을 위해)
     @return: (1, size) shaped numpy 오디오, 샘플레이트
     """
     tmp_dir = tempfile.gettempdir()
@@ -487,7 +492,7 @@ def getAudioCroppedFromURL(youtube_url, start_sec=None, end_sec=None, isMono=Tru
             wav_path = f"{tmp_basename}.wav"
 
         # librosa 로드, PANNs 모델은 32kHz 기준
-        audio, sr = librosa.load(wav_path, sr=32000, mono=isMono)
+        audio, sr = librosa.load(wav_path, sr=sr, mono=isMono)
 
         if start_sec is None and end_sec is None:
             return audio[None, :], sr
@@ -594,8 +599,37 @@ def eventDetectionWithPerTopk(device: str, audio, min_score=0.2):
     plt.ylabel("Probability")
     plt.legend()
     plt.grid(True)
+    plt.xticks(np.arange(0, int(duration_sec) + 1, 1))
     plt.tight_layout()
     plt.show()
+
+
+# 오디오에 대해 스피치 - 음악 분리
+def split_audio_to_speech_music(audio, model):
+    """
+    오디오 파일을 스피치와 음악으로 분리
+
+    @param audio: 오디오 numpy 배열, getAudioCroppedFromURL 함수에서 isMono = False로 지정하고 가져와야함
+    @param model: 모델, get_model(name='htdemucs').to(device)
+    @return: sources, sources[0]: drums, sources[1]: bass, sources[2]: other, sources[3]: vocal\n
+            Stero이므로 (2, N) 형태임
+    """
+    import torch
+    from demucs.apply import apply_model
+
+    is_cuda = torch.cuda.is_available()
+    device = torch.device("cuda" if is_cuda else "cpu")
+
+    audio_tensor = torch.tensor(audio, dtype=torch.float32).to(device)
+
+    model.eval()
+
+    with torch.no_grad():
+        sources = apply_model(model, audio_tensor, device=device.type, split=True)
+
+    sources = sources.squeeze(0).cpu()
+
+    return sources
 
 
 # * ------------------- Audio segmentation & 조음속도 계산 -------------------
@@ -627,7 +661,7 @@ def split_audio(audio_path, start_time, end_time, chunk_size=1, sr=16000):
 
 
 # 2. 침묵 제외 발화 시간 계산
-def get_speech_duration(audio_path, top_db=30):
+def get_speech_duration(audio_path, top_db):
     y, sr = librosa.load(audio_path, sr=None)
     intervals = librosa.effects.split(y, top_db=top_db)
     speech_duration = sum((end - start) for start, end in intervals) / sr
@@ -635,17 +669,18 @@ def get_speech_duration(audio_path, top_db=30):
 
 
 # 3. fast-whisper로 자막 추출 + 조음속도 계산
-def estimate_articulation_rate_fast_whisper(chunks, model):
+def estimate_articulation_rate_fast_whisper(chunks, model, top_db=30):
     results = []
     print("조음 속도 계산 진행중...")
 
     for start, end, chunk_path in tqdm(chunks, desc="Processing chunks"):
         try:
-            segments, _ = model.transcribe(chunk_path, language="ko", beam_size=1)
+            segments, _ = model.transcribe(chunk_path, language="ko", beam_size=5)
             text = "".join([seg.text.replace(" ", "") for seg in segments])
+            text = re.sub(r"[.,!?\"'“”‘’…\-–—():;]", "", text)
             num_chars = len(text)
 
-            speech_dur = get_speech_duration(chunk_path)
+            speech_dur = get_speech_duration(chunk_path, top_db)
             articulation_rate = num_chars / speech_dur if speech_dur > 0 else 0
 
             results.append(

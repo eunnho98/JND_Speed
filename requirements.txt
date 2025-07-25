@@ -7,3 +7,5 @@ soundfile==0.13.1
 tqdm==4.67.1
 matplotlib==3.10.3
 seaborn==0.13.2
+demucs==4.0.1
+faster-whisper==1.1.1
